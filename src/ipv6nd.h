@@ -52,6 +52,7 @@ struct ra {
 	uint32_t mtu;
 	uint8_t hoplimit;
 	struct ipv6_addrhead addrs;
+	bool hasrouteinformation;
 	bool hasdns;
 	bool expired;
 	bool willexpire;

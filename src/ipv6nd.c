@@ -71,6 +71,41 @@
 #define	ND_OPT_PI_FLAG_ROUTER	0x20	/* Router flag in PI */
 #endif
 
+#ifndef ND_OPT_SOURCE_LINK_LAYER_ADDRESS
+#define ND_OPT_SOURCE_LINK_LAYER_ADDRESS	1 /* RFC 4861 */
+struct nd_opt_source_link_layer_address {
+	uint8_t		nd_opt_source_link_layer_address_type;
+	uint8_t		nd_opt_source_link_layer_address_len;
+	/* followed by the link-layer address (variable in lenght) depending on link */
+}
+__CTASSERT(sizeof(struct nd_opt_source_link_layer_address) == 2);
+#endif
+
+#ifndef ND_OPT_TARGET_LINK_LAYER_ADDRESS
+#define ND_OPT_TARGET_LINK_LAYER_ADDRESS	2 /* RFC 4861 */
+struct nd_opt_target_link_layer_address {
+	uint8_t		nd_opt_target_link_layer_address_type;
+	uint8_t		nd_opt_target_link_layer_address_len;
+	/* followed by the link-layer address (variable in lenght) depending on link */
+}
+__CTASSERT(sizeof(struct nd_opt_target_link_layer_address) == 2);
+#endif
+
+#ifndef ND_OPT_ROUTE_INFORMATION
+#define ND_OPT_ROUTE_INFORMATION			24
+struct nd_opt_route_information {			/* Route Information Option RFC 4191 */
+	uint8_t		nd_opt_route_information_type;
+	uint8_t		nd_opt_route_information_len;
+	uint8_t		nd_opt_route_information_prefix_len;
+	uint8_t 	nd_opt_route_information_reserved_1 : 3; // 3-bit unused fields
+	int8_t		nd_opt_route_information_prf : 2; // 2 bit signed integer
+	uint8_t		nd_opt_route_information_reserved_2 : 3; // 3-bit unused fields
+	uint32_t	nd_opt_route_information_lifetime;
+	/* followed by 128 bit for the prefixes, but only prefix_len bits are valid */
+};
+__CTASSERT(sizeof(struct nd_opt_route_information) == 7);
+#endif
+
 #ifndef ND_OPT_RDNSS
 #define ND_OPT_RDNSS			25
 struct nd_opt_rdnss {           /* RDNSS option RFC 6106 */
@@ -1104,6 +1139,7 @@ ipv6nd_handlera(struct dhcpcd_ctx *ctx,
 	struct nd_opt_hdr ndo;
 	struct nd_opt_prefix_info pi;
 	struct nd_opt_mtu mtu;
+	struct nd_opt_route_information route_information;
 	struct nd_opt_rdnss rdnss;
 	uint8_t *p;
 	struct ra *rap;
@@ -1256,6 +1292,7 @@ ipv6nd_handlera(struct dhcpcd_ctx *ctx,
 		rap->retrans = RETRANS_TIMER;
 	rap->expired = rap->willexpire = rap->doexpire = false;
 	rap->hasdns = false;
+	rap->hasrouteinformation = false;
 	rap->isreachable = true;
 	has_address = false;
 	rap->mtu = 0;
@@ -1500,9 +1537,32 @@ ipv6nd_handlera(struct dhcpcd_ctx *ctx,
 			memcpy(&rdnss, p, sizeof(rdnss));
 			if (rdnss.nd_opt_rdnss_lifetime &&
 			    rdnss.nd_opt_rdnss_len > 1)
-				rap->hasdns = 1;
+				rap->hasdns = true;
 			break;
+		case ND_OPT_ROUTE_INFORMATION:
+			if (len < sizeof(route_information)) {
+				logmessage(loglevel, "%s: short route information option", ifp->name);
+				break;
+			}
+			memcpy(&route_information, p, sizeof(route_information));
+			if (route_information.nd_opt_route_information_lifetime &&
+			    route_information.nd_opt_route_information_len > 1)
+				rap->hasrouteinformation = true;
+			break;
+		case ND_OPT_SOURCE_LINK_LAYER_ADDRESS:
+		case ND_OPT_TARGET_LINK_LAYER_ADDRESS:
+			// Silently ignore these options
+			continue;
 		default:
+			// Debug log all unsupported/unknown options to make it easier
+			// for our users to debug issues caused by us not supporting
+			// a specific option they rely on.
+			logdebugx(
+				"%s: Unknown opt type %d in message from %s, ignoring..",
+				ifp->name,
+				ndo.nd_opt_type,
+				rap->sfrom
+			);
 			continue;
 		}
 	}
